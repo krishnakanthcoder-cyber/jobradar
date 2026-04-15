@@ -1,15 +1,8 @@
 [build]
 builder = "NIXPACKS"
 
-# The web service serves the Next.js dashboard on the public URL.
-# The scheduler service runs the scraper every 20 minutes in the background.
-# Both services share the same Volume where jobs.db lives (mounted at /data).
-# Railway will auto-redeploy both services on every git push.
-
-[[services]]
-name = "web"
+[deploy]
 startCommand = "pnpm start"
-
-[[services]]
-name = "scheduler"
-startCommand = "pnpm run scheduler"
+healthcheckPath = "/"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
