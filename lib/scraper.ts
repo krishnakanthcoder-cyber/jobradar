@@ -38,12 +38,18 @@ async function extractJobLinks(
   });
 }
 
+const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+
 async function scrapePortalKeyword(
   portalName: string,
   url: string,
   keyword: string
 ): Promise<ScrapedJob[]> {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: isRailway ? '/usr/bin/chromium-browser' : undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
   try {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
