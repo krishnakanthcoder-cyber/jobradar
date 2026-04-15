@@ -1,6 +1,6 @@
-import { chromium } from 'playwright';
-import md5 from 'md5';
+import * as cheerio from 'cheerio';
 import { PORTALS, KEYWORDS } from './portals';
+import crypto from 'crypto';
 
 export interface ScrapedJob {
   id: string;
@@ -11,100 +11,85 @@ export interface ScrapedJob {
   keyword: string;
 }
 
-/**
- * Generic DOM extractor: returns every anchor that looks like a job link.
- * Each portal page is different, so we cast a wide net and let callers filter.
- */
-async function extractJobLinks(
-  page: import('playwright').Page
-): Promise<Array<{ title: string; url: string }>> {
-  return page.evaluate(() => {
-    const seen = new Set<string>();
-    const results: Array<{ title: string; url: string }> = [];
-
-    // Grab all anchors with non-trivial text that link somewhere
-    const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'));
-    for (const a of anchors) {
-      const href = a.href;
-      const title = a.textContent?.trim() ?? '';
-      if (!href || !title || title.length < 5) continue;
-      // Skip nav / logo / footer links (very short or obviously generic)
-      if (['home', 'jobs', 'search', 'careers', 'back'].includes(title.toLowerCase())) continue;
-      if (seen.has(href)) continue;
-      seen.add(href);
-      results.push({ title, url: href });
-    }
-    return results;
-  });
+function makeId(url: string): string {
+  return crypto.createHash('md5').update(url).digest('hex');
 }
 
-const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
-
-async function scrapePortalKeyword(
-  portalName: string,
-  url: string,
-  keyword: string
-): Promise<ScrapedJob[]> {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: isRailway ? '/usr/bin/chromium-browser' : undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+async function scrapePortal(name: string, url: string, keyword: string): Promise<ScrapedJob[]> {
   try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
 
-    // Wait for any list-like structure to appear
-    await page
-      .waitForSelector('ul, ol, [role="list"], [class*="job"], [class*="result"]', {
-        timeout: 15_000,
-      })
-      .catch(() => {/* continue even if no match */});
+    if (!res.ok) {
+      console.log(`[${name}] HTTP ${res.status} for keyword "${keyword}"`);
+      return [];
+    }
 
-    // Extra buffer for JS rendering
-    await page.waitForTimeout(3_000);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const jobs: ScrapedJob[] = [];
 
-    const links = await extractJobLinks(page);
-    const found_at = new Date().toISOString();
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const title = $(el).text().trim();
 
-    return links.map((link) => ({
-      id: md5(link.url),
-      title: link.title,
-      url: link.url,
-      found_at,
-      company: portalName,
-      keyword,
-    }));
-  } finally {
-    await browser.close();
+      if (
+        title.length > 10 &&
+        title.length < 150 &&
+        (
+          href.includes('/job') ||
+          href.includes('/career') ||
+          href.includes('/position') ||
+          href.includes('/opening') ||
+          href.includes('/role') ||
+          href.includes('/apply')
+        )
+      ) {
+        const fullUrl = href.startsWith('http') ? href : new URL(href, url).toString();
+        jobs.push({
+          id: makeId(fullUrl),
+          title: title.replace(/\s+/g, ' '),
+          company: name,
+          keyword,
+          url: fullUrl,
+          found_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    console.log(`[${name}] "${keyword}" → ${jobs.length} jobs found`);
+    return jobs;
+
+  } catch (err) {
+    console.log(`[${name}] Failed for "${keyword}": ${(err as Error).message}`);
+    return [];
   }
 }
 
 export async function scrapeAll(): Promise<ScrapedJob[]> {
+  const allJobs: ScrapedJob[] = [];
   const seen = new Set<string>();
-  const all: ScrapedJob[] = [];
 
   for (const portal of PORTALS) {
     for (const keyword of KEYWORDS) {
       const url = portal.buildUrl(keyword);
-      try {
-        console.log(`[scraper] ${portal.name} / "${keyword}"`);
-        const jobs = await scrapePortalKeyword(portal.name, url, keyword);
-        let added = 0;
-        for (const job of jobs) {
-          if (!seen.has(job.id)) {
-            seen.add(job.id);
-            all.push(job);
-            added++;
-          }
+      const jobs = await scrapePortal(portal.name, url, keyword);
+      for (const job of jobs) {
+        if (!seen.has(job.id)) {
+          seen.add(job.id);
+          allJobs.push(job);
         }
-        console.log(`[scraper]   → ${added} unique jobs`);
-      } catch (err) {
-        console.error(`[scraper] error on ${portal.name}/"${keyword}":`, err);
-        // continue with next combo
       }
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
 
-  return all;
+  console.log(`Total unique jobs scraped: ${allJobs.length}`);
+  return allJobs;
 }
