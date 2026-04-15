@@ -1,5 +1,6 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.scheduler"
 
 [deploy]
 startCommand = "pnpm dlx tsx scripts/scheduler.ts"
