@@ -37,6 +37,11 @@ async function ensureInit(): Promise<void> {
       email TEXT PRIMARY KEY
     );
   `);
+  // Migrate: add expired column if it doesn't exist yet
+  await pool.query(`
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS expired INTEGER NOT NULL DEFAULT 0;
+  `);
+
   await seedSubscribers();
   initialized = true;
 }
