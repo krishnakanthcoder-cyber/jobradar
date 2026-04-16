@@ -15,7 +15,7 @@ function makeId(url: string): string {
   return crypto.createHash('md5').update(url).digest('hex');
 }
 
-async function scrapePortal(name: string, url: string, keyword: string): Promise<ScrapedJob[]> {
+export async function scrapePortal(name: string, url: string, keyword: string): Promise<ScrapedJob[]> {
   try {
     const res = await fetch(url, {
       headers: {

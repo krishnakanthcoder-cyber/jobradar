@@ -53,10 +53,19 @@ async function seedSubscribers(): Promise<void> {
   }
 }
 
-export async function getKnownIds(): Promise<Set<string>> {
+export async function getJobIdsBySource(company: string, keyword: string): Promise<Set<string>> {
   await ensureInit();
-  const result = await pool.query('SELECT id FROM jobs');
+  const result = await pool.query(
+    'SELECT id FROM jobs WHERE company = $1 AND keyword = $2',
+    [company, keyword]
+  );
   return new Set(result.rows.map((r: { id: string }) => r.id));
+}
+
+export async function removeJobs(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await ensureInit();
+  await pool.query('DELETE FROM jobs WHERE id = ANY($1)', [ids]);
 }
 
 export async function insertJobs(jobs: Omit<Job, 'notified'>[]): Promise<void> {
