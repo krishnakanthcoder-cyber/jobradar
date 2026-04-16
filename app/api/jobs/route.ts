@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRecentJobs } from '@/lib/db';
+import { getTodaysJobs, getAllActiveJobs } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +8,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const company = searchParams.get('company') ?? undefined;
     const keyword = searchParams.get('keyword') ?? undefined;
-    const jobs = await getRecentJobs(50, { company, keyword });
+    const all = searchParams.get('all') === 'true';
+
+    const jobs = all
+      ? await getAllActiveJobs({ company, keyword })
+      : await getTodaysJobs({ company, keyword });
+
     return NextResponse.json(jobs);
   } catch (err) {
     console.error('[api/jobs] error:', err);

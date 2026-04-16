@@ -4,18 +4,22 @@ import { useEffect, useState, useCallback } from 'react';
 
 interface Job {
   id: string;
-  title: string;
-  url: string;
+  title: string | null;
+  url: string | null;
   found_at: string;
-  notified: number;
   company: string | null;
   keyword: string | null;
 }
 
 const POLL_INTERVAL = 30_000;
-const NEW_JOB_WINDOW = 20 * 60 * 1000;
+const BRAND_NEW_WINDOW = 20 * 60 * 1000; // 20 minutes
 
-const COMPANIES = ['Microsoft', 'Google', 'Amazon', 'Apple', 'Meta'];
+const COMPANIES = [
+  'Microsoft', 'Google', 'Amazon', 'Apple', 'Meta',
+  'Nvidia', 'Salesforce', 'Netflix', 'Stripe', 'OpenAI',
+  'Anthropic', 'Figma', 'Notion', 'Airbnb',
+];
+
 const KEYWORDS = [
   'Software Engineer',
   'Backend Engineer',
@@ -25,12 +29,20 @@ const KEYWORDS = [
   'ML Engineer',
 ];
 
-function isRecent(foundAt: string): boolean {
-  return Date.now() - new Date(foundAt).getTime() < NEW_JOB_WINDOW;
+function getDotColor(foundAt: string): { color: string; label: string } {
+  const diff = Date.now() - new Date(foundAt).getTime();
+  if (diff < BRAND_NEW_WINDOW) return { color: '#22c55e', label: 'Found in last 20 min' };
+  return { color: '#eab308', label: 'Found earlier today' };
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `found ${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `found ${hours}h ago`;
+  return `found at ${new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 const chip = (active: boolean): React.CSSProperties => ({
@@ -50,6 +62,7 @@ const chip = (active: boolean): React.CSSProperties => ({
 export default function Home() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<string | null>(null);
   const [keyword, setKeyword] = useState<string | null>(null);
@@ -68,6 +81,8 @@ export default function Home() {
       setError(null);
     } catch {
       setError('Could not load jobs');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -77,15 +92,20 @@ export default function Home() {
     return () => clearInterval(id);
   }, [company, keyword, fetchJobs]);
 
-  return (
-    <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 16px', fontFamily: 'monospace' }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>JobRadar</h1>
+  const lastCheckedStr = lastChecked
+    ? lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
 
-      <p style={{ fontSize: 13, color: '#666', marginBottom: 20 }}>
-        {lastChecked ? `Last checked: ${lastChecked.toLocaleTimeString()}` : 'Loading\u2026'}
+  return (
+    <main style={{ maxWidth: 780, margin: '0 auto', padding: '32px 16px', fontFamily: 'monospace' }}>
+
+      {/* Header */}
+      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>JobRadar</h1>
+      <p style={{ fontSize: 13, color: '#666', marginBottom: 24 }}>
+        Freshly posted jobs — updated every 20 min
       </p>
 
-      {/* Company filter row */}
+      {/* Company filter */}
       <div style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: '#888', marginRight: 8 }}>Company:</span>
         <span style={chip(company === null)} onClick={() => setCompany(null)}>All</span>
@@ -96,7 +116,7 @@ export default function Home() {
         ))}
       </div>
 
-      {/* Keyword filter row */}
+      {/* Keyword filter */}
       <div style={{ marginBottom: 24 }}>
         <span style={{ fontSize: 12, color: '#888', marginRight: 8 }}>Keyword:</span>
         <span style={chip(keyword === null)} onClick={() => setKeyword(null)}>All</span>
@@ -107,12 +127,37 @@ export default function Home() {
         ))}
       </div>
 
-      {error && <p style={{ color: '#c00', marginBottom: 16 }}>{error}</p>}
-      {jobs.length === 0 && !error && <p style={{ color: '#888' }}>No jobs found yet.</p>}
+      {/* Status bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, fontSize: 12, color: '#888' }}>
+        {lastCheckedStr && <span>Last checked: {lastCheckedStr}</span>}
+        <span
+          style={{ cursor: 'pointer', color: '#0070f3', textDecoration: 'underline' }}
+          onClick={() => { setLoading(true); fetchJobs(company, keyword); }}
+        >
+          Refresh now
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+          last 20 min
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#eab308', display: 'inline-block', marginLeft: 8 }} />
+          earlier today
+        </span>
+      </div>
 
+      {/* Error */}
+      {error && <p style={{ color: '#c00', marginBottom: 16 }}>{error}</p>}
+
+      {/* Empty state */}
+      {!loading && !error && jobs.length === 0 && (
+        <p style={{ color: '#888', padding: '32px 0' }}>
+          No new jobs posted yet today.{lastCheckedStr ? ` Last checked: ${lastCheckedStr}` : ''}
+        </p>
+      )}
+
+      {/* Job list */}
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
         {jobs.map((job) => {
-          const recent = isRecent(job.found_at);
+          const dot = getDotColor(job.found_at);
           return (
             <li
               key={job.id}
@@ -124,61 +169,54 @@ export default function Home() {
                 borderBottom: '1px solid #eee',
               }}
             >
-              {/* Green dot indicator */}
+              {/* Status dot */}
               <span
-                title={recent ? 'Found in the last 20 min' : ''}
+                title={dot.label}
                 style={{
                   marginTop: 5,
                   width: 10,
                   height: 10,
                   borderRadius: '50%',
                   flexShrink: 0,
-                  backgroundColor: recent ? '#22c55e' : 'transparent',
-                  border: recent ? 'none' : '1px solid #ccc',
+                  backgroundColor: dot.color,
                 }}
               />
 
               <div>
-                {/* Title link */}
-                <a
-                  href={job.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: '#0070f3', textDecoration: 'none', fontWeight: 500 }}
-                >
-                  {job.title}
-                </a>
+                {/* Title */}
+                {job.url ? (
+                  <a
+                    href={job.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#0070f3', textDecoration: 'none', fontWeight: 500 }}
+                  >
+                    {job.title ?? 'Untitled'}
+                  </a>
+                ) : (
+                  <span style={{ fontWeight: 500 }}>{job.title ?? 'Untitled'}</span>
+                )}
 
-                {/* Meta row: time + company tag + keyword tag */}
+                {/* Meta row */}
                 <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#999' }}>{formatTime(job.found_at)}</span>
+                  <span style={{ fontSize: 12, color: '#999' }}>
+                    {formatRelativeTime(job.found_at)}
+                  </span>
 
                   {job.company && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        padding: '1px 7px',
-                        borderRadius: 3,
-                        background: '#f0f4ff',
-                        color: '#3b5bdb',
-                        border: '1px solid #c5d0f5',
-                      }}
-                    >
+                    <span style={{
+                      fontSize: 11, padding: '1px 7px', borderRadius: 3,
+                      background: '#f0f4ff', color: '#3b5bdb', border: '1px solid #c5d0f5',
+                    }}>
                       {job.company}
                     </span>
                   )}
 
                   {job.keyword && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        padding: '1px 7px',
-                        borderRadius: 3,
-                        background: '#f3faf3',
-                        color: '#2f7a2f',
-                        border: '1px solid #b5ddb5',
-                      }}
-                    >
+                    <span style={{
+                      fontSize: 11, padding: '1px 7px', borderRadius: 3,
+                      background: '#f3faf3', color: '#2f7a2f', border: '1px solid #b5ddb5',
+                    }}>
                       {job.keyword}
                     </span>
                   )}

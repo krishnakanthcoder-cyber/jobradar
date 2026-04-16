@@ -3,61 +3,55 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
 import cron from 'node-cron';
-import { scrapePortal } from '../lib/scraper';
-import { insertJobs, removeJobs, getJobIdsBySource } from '../lib/db';
+import { scrapeAll } from '../lib/scraper';
+import { getKnownIds, insertNewJobs, markExpired, markNotified, cleanupOldJobs } from '../lib/db';
+import { findNewJobs, findExpiredJobs } from '../lib/diff';
 import { notifySubscribers } from '../lib/notifier';
-import { PORTALS, KEYWORDS } from '../lib/portals';
-import type { ScrapedJob } from '../lib/scraper';
+
+let lastCleanupDate = '';
 
 async function run(): Promise<void> {
   const timestamp = new Date().toISOString();
   console.log(`\n[scheduler] ${timestamp} — starting scrape`);
 
-  const allNewJobs: ScrapedJob[] = [];
-
-  for (const portal of PORTALS) {
-    for (const keyword of KEYWORDS) {
-      try {
-        const url = portal.buildUrl(keyword);
-        const scraped = await scrapePortal(portal.name, url, keyword);
-        const scrapedIds = new Set(scraped.map((j) => j.id));
-
-        // Jobs stored in DB for this portal+keyword from the previous run
-        const storedIds = await getJobIdsBySource(portal.name, keyword);
-
-        // New = appeared since last run
-        const newJobs = scraped.filter((j) => !storedIds.has(j.id));
-
-        // Removed = were stored but no longer on the page
-        const removedIds = [...storedIds].filter((id) => !scrapedIds.has(id));
-
-        if (removedIds.length > 0) {
-          await removeJobs(removedIds);
-          console.log(`[${portal.name}/${keyword}] removed ${removedIds.length} stale jobs`);
-        }
-
-        if (newJobs.length > 0) {
-          await insertJobs(newJobs);
-          allNewJobs.push(...newJobs);
-          console.log(`[${portal.name}/${keyword}] ${newJobs.length} new jobs`);
-        }
-
-        if (newJobs.length === 0 && removedIds.length === 0) {
-          console.log(`[${portal.name}/${keyword}] no changes (${scraped.length} jobs)`);
-        }
-      } catch (err) {
-        console.error(`[scheduler] error on ${portal.name}/"${keyword}":`, err);
-      }
-
-      // Rate limit between requests
-      await new Promise((r) => setTimeout(r, 2000));
-    }
+  // Daily cleanup: remove jobs older than 7 days (runs once per day)
+  const today = timestamp.slice(0, 10);
+  if (lastCleanupDate !== today) {
+    const removed = await cleanupOldJobs();
+    console.log(`[scheduler] cleanup: removed ${removed} jobs older than 7 days`);
+    lastCleanupDate = today;
   }
 
-  console.log(`[scheduler] done — ${allNewJobs.length} new jobs this run`);
+  const scraped = await scrapeAll();
+  console.log(`[scheduler] total scraped: ${scraped.length}`);
 
-  if (allNewJobs.length > 0) {
-    await notifySubscribers(allNewJobs);
+  const knownIds = await getKnownIds();
+
+  const newJobs = findNewJobs(scraped, knownIds);
+  const expiredIds = findExpiredJobs(scraped, knownIds);
+
+  console.log(`[scheduler] new jobs found: ${newJobs.length}`);
+  console.log(`[scheduler] expired/removed: ${expiredIds.length}`);
+
+  if (newJobs.length > 0) {
+    const byCompany = new Map<string, number>();
+    for (const job of newJobs) {
+      const c = job.company ?? 'Unknown';
+      byCompany.set(c, (byCompany.get(c) ?? 0) + 1);
+    }
+    const companiesList = [...byCompany.keys()].join(', ');
+    console.log(`[scheduler] companies with new jobs: ${companiesList}`);
+    for (const [company, count] of byCompany) {
+      console.log(`[scheduler]   ${company}: ${count} new`);
+    }
+
+    await insertNewJobs(newJobs);
+    await notifySubscribers(newJobs);
+    await markNotified(newJobs.map((j) => j.id));
+  }
+
+  if (expiredIds.length > 0) {
+    await markExpired(expiredIds);
   }
 }
 
