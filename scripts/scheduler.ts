@@ -15,12 +15,11 @@ async function run(): Promise<void> {
   const scraped = await scrapeAll();
   console.log(`[scheduler] total scraped: ${scraped.length} jobs`);
 
-  const knownIds = getKnownIds();
+  const knownIds = await getKnownIds();
   const newJobs = getNewJobs(scraped, knownIds);
   console.log(`[scheduler] new jobs: ${newJobs.length}`);
 
   if (newJobs.length > 0) {
-    // Log which companies had new jobs
     const byCompany = new Map<string, number>();
     for (const job of newJobs) {
       const c = job.company ?? 'Unknown';
@@ -30,9 +29,9 @@ async function run(): Promise<void> {
       console.log(`[scheduler]   ${company}: ${count} new`);
     }
 
-    insertJobs(newJobs);
+    await insertJobs(newJobs);
     await notifySubscribers(newJobs);
-    markNotified(newJobs.map((j) => j.id));
+    await markNotified(newJobs.map((j) => j.id));
   }
 }
 

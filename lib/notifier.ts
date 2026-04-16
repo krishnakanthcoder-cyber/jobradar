@@ -13,7 +13,6 @@ function createTransport() {
 }
 
 function buildBody(jobs: ScrapedJob[]): string {
-  // Group by company
   const byCompany = new Map<string, ScrapedJob[]>();
   for (const job of jobs) {
     const company = job.company ?? 'Other';
@@ -36,7 +35,7 @@ function buildBody(jobs: ScrapedJob[]): string {
 export async function notifySubscribers(newJobs: ScrapedJob[]): Promise<void> {
   if (newJobs.length === 0) return;
 
-  const subscribers = getSubscribers();
+  const subscribers = await getSubscribers();
   if (subscribers.length === 0) {
     console.log('[notifier] no subscribers configured — skipping email');
     return;
