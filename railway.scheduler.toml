@@ -1,0 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.scheduler"
+
+[deploy]
+startCommand = "pnpm dlx tsx scripts/scheduler.ts"
+restartPolicyType = "ON_FAILURE"
