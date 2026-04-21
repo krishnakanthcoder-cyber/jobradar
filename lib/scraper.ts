@@ -86,7 +86,7 @@ export async function scrapeAll(): Promise<ScrapedJob[]> {
           allJobs.push(job);
         }
       }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 
