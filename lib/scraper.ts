@@ -15,7 +15,12 @@ function makeId(url: string): string {
   return crypto.createHash('md5').update(url).digest('hex');
 }
 
-export async function scrapePortal(name: string, url: string, keyword: string): Promise<ScrapedJob[]> {
+export async function scrapePortal(
+  name: string,
+  url: string,
+  keyword: string,
+  selector?: string
+): Promise<ScrapedJob[]> {
   try {
     const res = await fetch(url, {
       headers: {
@@ -35,22 +40,21 @@ export async function scrapePortal(name: string, url: string, keyword: string): 
     const $ = cheerio.load(html);
     const jobs: ScrapedJob[] = [];
 
-    $('a[href]').each((_, el) => {
-      const href = $(el).attr('href') || '';
-      const title = $(el).text().trim();
+    if (selector) {
+      // Use the portal-specific CSS selector to find job title elements
+      $(selector).each((_, el) => {
+        const title = $(el).text().trim();
+        if (!title) return;
 
-      if (
-        title.length > 10 &&
-        title.length < 150 &&
-        (
-          href.includes('/job') ||
-          href.includes('/career') ||
-          href.includes('/position') ||
-          href.includes('/opening') ||
-          href.includes('/role') ||
-          href.includes('/apply')
-        )
-      ) {
+        // Find the href: the element itself, a child <a>, or the closest ancestor <a>
+        let href =
+          $(el).attr('href') ||
+          $(el).find('a[href]').first().attr('href') ||
+          $(el).closest('a[href]').attr('href') ||
+          '';
+
+        if (!href) return;
+
         const fullUrl = href.startsWith('http') ? href : new URL(href, url).toString();
         jobs.push({
           id: makeId(fullUrl),
@@ -60,8 +64,37 @@ export async function scrapePortal(name: string, url: string, keyword: string): 
           url: fullUrl,
           found_at: new Date().toISOString(),
         });
-      }
-    });
+      });
+    } else {
+      // Generic fallback: scan all <a href> links that look like job links
+      $('a[href]').each((_, el) => {
+        const href = $(el).attr('href') || '';
+        const title = $(el).text().trim();
+
+        if (
+          title.length > 10 &&
+          title.length < 150 &&
+          (
+            href.includes('/job') ||
+            href.includes('/career') ||
+            href.includes('/position') ||
+            href.includes('/opening') ||
+            href.includes('/role') ||
+            href.includes('/apply')
+          )
+        ) {
+          const fullUrl = href.startsWith('http') ? href : new URL(href, url).toString();
+          jobs.push({
+            id: makeId(fullUrl),
+            title: title.replace(/\s+/g, ' '),
+            company: name,
+            keyword,
+            url: fullUrl,
+            found_at: new Date().toISOString(),
+          });
+        }
+      });
+    }
 
     console.log(`[${name}] "${keyword}" → ${jobs.length} jobs found`);
     return jobs;
@@ -79,7 +112,7 @@ export async function scrapeAll(): Promise<ScrapedJob[]> {
   for (const portal of PORTALS) {
     for (const keyword of KEYWORDS) {
       const url = portal.buildUrl(keyword);
-      const jobs = await scrapePortal(portal.name, url, keyword);
+      const jobs = await scrapePortal(portal.name, url, keyword, portal.selector);
       for (const job of jobs) {
         if (!seen.has(job.id)) {
           seen.add(job.id);
@@ -90,6 +123,5 @@ export async function scrapeAll(): Promise<ScrapedJob[]> {
     }
   }
 
-  console.log(`Total unique jobs scraped: ${allJobs.length}`);
   return allJobs;
 }
