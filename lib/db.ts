@@ -1,10 +1,8 @@
 import { Pool } from 'pg';
 
-const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isRailway ? { rejectUnauthorized: false } : false,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
 export interface Job {
