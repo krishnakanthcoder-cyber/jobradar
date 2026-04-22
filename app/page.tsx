@@ -199,8 +199,6 @@ export default function Home() {
   const keywordDropdownRef = useRef<HTMLDivElement | null>(null);
   const timeDropdownRef = useRef<HTMLDivElement | null>(null);
   const sortDropdownRef = useRef<HTMLDivElement | null>(null);
-  const scrapePollRef = useRef<number | null>(null);
-
   const fetchJobs = useCallback(async () => {
     try {
       const res = await fetch('/api/jobs');
@@ -216,61 +214,71 @@ export default function Home() {
     }
   }, []);
 
-  const fetchScanProgress = useCallback(async () => {
-    try {
-      const res = await fetch('/api/scrape/status', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data: ScanProgress = await res.json();
-      setScanProgress(data);
-    } catch {
-      // Best effort only; the final scrape result still drives success/failure.
-    }
-  }, []);
-
-  const stopProgressPolling = useCallback(() => {
-    if (scrapePollRef.current !== null) {
-      window.clearInterval(scrapePollRef.current);
-      scrapePollRef.current = null;
-    }
-  }, []);
-
-  const startProgressPolling = useCallback(() => {
-    stopProgressPolling();
-    void fetchScanProgress();
-    scrapePollRef.current = window.setInterval(() => {
-      void fetchScanProgress();
-    }, 700);
-  }, [fetchScanProgress, stopProgressPolling]);
-
   useEffect(() => {
     fetchJobs();
-    void fetchScanProgress();
     const id = setInterval(() => fetchJobs(), POLL_INTERVAL);
     return () => clearInterval(id);
-  }, [fetchJobs, fetchScanProgress]);
+  }, [fetchJobs]);
 
   const triggerScrape = async () => {
     setScraping(true);
     setScrapeResult(null);
-    startProgressPolling();
+    setScanProgress(null);
+
     try {
       const res = await fetch('/api/scrape', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setScrapeResult({
-        msg:
-          data.newJobs > 0
-            ? `${data.newJobs} new listing${data.newJobs === 1 ? '' : 's'} found across ${data.scraped} job${data.scraped === 1 ? '' : 's'} posted today`
-            : `All clear - no new listings found (${data.scraped} jobs posted today)`,
-        ok: true,
-      });
-      await fetchScanProgress();
-      fetchJobs();
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop() ?? '';
+
+        for (const chunk of chunks) {
+          const line = chunk.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          let event: Record<string, unknown>;
+          try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (event.type === 'progress') {
+            setScanProgress({
+              running: true,
+              stage: event.stage as ScanProgress['stage'],
+              message: event.message as string,
+              totalPortals: event.totalPortals as number,
+              completedPortals: event.completedPortals as number,
+              currentPortal: event.currentPortal as string | null,
+              recentJobs: event.recentJobs as number,
+              expiredJobs: event.expiredJobs as number,
+              startedAt: null,
+              finishedAt: null,
+              error: null,
+            });
+          } else if (event.type === 'complete') {
+            const { newJobs, scraped } = event as { newJobs: number; scraped: number };
+            setScrapeResult({
+              msg:
+                newJobs > 0
+                  ? `${newJobs} new listing${newJobs === 1 ? '' : 's'} found across ${scraped} job${scraped === 1 ? '' : 's'} posted today`
+                  : `All clear — no new listings found (${scraped} jobs posted today)`,
+              ok: true,
+            });
+            fetchJobs();
+          } else if (event.type === 'error') {
+            throw new Error(event.error as string);
+          }
+        }
+      }
     } catch (e) {
       setScrapeResult({ msg: (e as Error).message, ok: false });
-      await fetchScanProgress();
     } finally {
-      stopProgressPolling();
       setScraping(false);
     }
   };
@@ -375,12 +383,6 @@ export default function Home() {
       document.removeEventListener('keydown', handleEscape);
     };
   }, [openDropdown]);
-
-  useEffect(() => {
-    return () => {
-      stopProgressPolling();
-    };
-  }, [stopProgressPolling]);
 
   return (
     <>
