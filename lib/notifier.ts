@@ -34,7 +34,7 @@ function buildHtml(jobs: ScrapedJob[], subject: string): string {
                       ${job.title ?? 'Untitled Role'}
                     </p>
                     <p style="margin:0;font-size:13px;color:#78716c;">
-                      ${job.location ?? 'United States'}
+                      United States
                     </p>
                   </td>
                   <td style="vertical-align:middle;white-space:nowrap;">
