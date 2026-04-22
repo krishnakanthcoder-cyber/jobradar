@@ -1388,7 +1388,7 @@ export default function Home() {
                   <span className="hero-chip">United States only</span>
                   <span className="hero-chip">Greenhouse + Ashby</span>
                   <span className="hero-chip">Refreshes every 30s</span>
-                  <span className="hero-chip">Scheduled scan every 20m</span>
+                  <span className="hero-chip">Auto-scan every 20m</span>
                   <span className="hero-chip">Central time today feed</span>
                 </div>
               </div>
