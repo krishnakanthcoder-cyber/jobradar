@@ -27,9 +27,20 @@ export interface Job {
   notified: number;
 }
 
+interface SubscriberRow {
+  email: string;
+}
+
 type JobInput = Omit<Job, 'expired' | 'notified'>;
 type JobFilters = { company?: string; keyword?: string };
 type JobsTableName = 'today_jobs' | 'new_jobs';
+type JobRow = Job;
+interface ScanStateRow {
+  source: string;
+  company: string;
+  last_successful_scan_started_at?: string | null;
+  last_successful_scan_job_ids_json?: string | null;
+}
 
 const TODAY_JOBS_TABLE: JobsTableName = 'today_jobs';
 const NEW_JOBS_TABLE: JobsTableName = 'new_jobs';
@@ -77,6 +88,43 @@ function normalizeJobRow(job: JobInput) {
   };
 }
 
+function getJobsTable(table: JobsTableName) {
+  return (getSupabase() as any).from(table) as {
+    select: (columns: string) => any;
+    upsert: (
+      values: JobRow | JobRow[],
+      options?: {
+        onConflict?: string;
+        ignoreDuplicates?: boolean;
+        count?: 'exact' | 'planned' | 'estimated';
+        defaultToNull?: boolean;
+      }
+    ) => PromiseLike<{
+      error: { message: string } | null;
+      data?: unknown;
+      count?: number | null;
+    }>;
+    delete: (options?: { count?: 'exact' | 'planned' | 'estimated' }) => any;
+  };
+}
+
+function getScanStateTable() {
+  return (getSupabase() as any).from('scan_state') as {
+    select: (columns: string) => any;
+    upsert: (
+      values: ScanStateRow | ScanStateRow[],
+      options?: {
+        onConflict?: string;
+        ignoreDuplicates?: boolean;
+      }
+    ) => PromiseLike<{
+      error: { message: string } | null;
+      data?: unknown;
+      count?: number | null;
+    }>;
+  };
+}
+
 async function supportsJobsTable(table: JobsTableName): Promise<boolean> {
   const current = table === TODAY_JOBS_TABLE ? hasTodayJobsTable : hasNewJobsTable;
   if (current !== null) return current;
@@ -111,10 +159,7 @@ async function assertJobsTable(table: JobsTableName): Promise<void> {
 async function supportsScanStateTable(): Promise<boolean> {
   if (hasScanStateTable !== null) return hasScanStateTable;
 
-  const { error } = await getSupabase()
-    .from('scan_state')
-    .select('source, company')
-    .limit(1);
+  const { error } = await getScanStateTable().select('source, company').limit(1);
 
   if (!error) {
     hasScanStateTable = true;
@@ -134,8 +179,7 @@ async function supportsScanStateSnapshotColumn(): Promise<boolean> {
   if (hasScanStateSnapshotColumn !== null) return hasScanStateSnapshotColumn;
   if (!(await supportsScanStateTable())) return false;
 
-  const { error } = await getSupabase()
-    .from('scan_state')
+  const { error } = await getScanStateTable()
     .select('last_successful_scan_job_ids_json')
     .limit(1);
 
@@ -177,10 +221,22 @@ async function seedSubscribers(): Promise<void> {
     Boolean
   ) as string[];
 
+  const subscribersTable = (getSupabase() as any).from(
+    'subscribers'
+  ) as {
+    upsert: (
+      values: SubscriberRow | SubscriberRow[],
+      options?: { onConflict?: string; ignoreDuplicates?: boolean }
+    ) => PromiseLike<{ error: { message: string } | null }>;
+  };
+
   for (const email of emails) {
-    await getSupabase()
-      .from('subscribers')
-      .upsert({ email }, { onConflict: 'email', ignoreDuplicates: true });
+    const { error } = await subscribersTable.upsert(
+      { email },
+      { onConflict: 'email', ignoreDuplicates: true }
+    );
+
+    if (error) throw new Error(`seedSubscribers: ${error.message}`);
   }
 }
 
@@ -188,14 +244,14 @@ async function getTableIds(table: JobsTableName): Promise<Set<string>> {
   await ensureInit();
   await assertJobsTable(table);
 
-  const { data, error } = await getSupabase().from(table).select('id');
+  const { data, error } = await getJobsTable(table).select('id');
   if (error) throw new Error(`getTableIds(${table}): ${error.message}`);
   return new Set((data ?? []).map((row: { id: string }) => row.id));
 }
 
 async function deleteRowsByIds(table: JobsTableName, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  const { error } = await getSupabase().from(table).delete().in('id', ids);
+  const { error } = await getJobsTable(table).delete().in('id', ids);
   if (error) throw new Error(`deleteRowsByIds(${table}): ${error.message}`);
 }
 
@@ -203,7 +259,7 @@ async function deleteAllRows(table: JobsTableName): Promise<void> {
   await ensureInit();
   await assertJobsTable(table);
 
-  const { error } = await getSupabase().from(table).delete().not('id', 'is', null);
+  const { error } = await getJobsTable(table).delete().not('id', 'is', null);
   if (error) throw new Error(`deleteAllRows(${table}): ${error.message}`);
 }
 
@@ -222,9 +278,10 @@ async function replaceJobsInTable(
   const uniqueJobs = [...new Map(jobs.map((job) => [job.id, job])).values()];
   const rows = uniqueJobs.map(normalizeJobRow);
 
-  const { error } = await getSupabase()
-    .from(table)
-    .upsert(rows, { onConflict: 'id', ignoreDuplicates: false });
+  const { error } = await getJobsTable(table).upsert(rows, {
+    onConflict: 'id',
+    ignoreDuplicates: false,
+  });
 
   if (error) throw new Error(`replaceJobsInTable(${table}): ${error.message}`);
 
@@ -246,9 +303,10 @@ async function appendJobsToTable(
   const uniqueJobs = [...new Map(jobs.map((job) => [job.id, job])).values()];
   const rows = uniqueJobs.map(normalizeJobRow);
 
-  const { error } = await getSupabase()
-    .from(table)
-    .upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+  const { error } = await getJobsTable(table).upsert(rows, {
+    onConflict: 'id',
+    ignoreDuplicates: true,
+  });
 
   if (error) throw new Error(`appendJobsToTable(${table}): ${error.message}`);
 }
@@ -260,8 +318,7 @@ async function getJobsFromTable(
   await ensureInit();
   await assertJobsTable(table);
 
-  let query = getSupabase()
-    .from(table)
+  let query = getJobsTable(table)
     .select('*')
     .order('first_published', { ascending: false })
     .order('found_at', { ascending: false });
@@ -278,8 +335,7 @@ async function cleanupTable(table: JobsTableName, cutoff: string): Promise<numbe
   await ensureInit();
   await assertJobsTable(table);
 
-  const { error, count } = await getSupabase()
-    .from(table)
+  const { error, count } = await getJobsTable(table)
     .delete({ count: 'exact' })
     .lt('found_at', cutoff);
 
@@ -315,8 +371,7 @@ export async function getPreviousSuccessfulScanIds(
   const snapshotColumn = await getScanSnapshotColumnName();
   if (!snapshotColumn) return new Set<string>();
 
-  const { data, error } = await getSupabase()
-    .from('scan_state')
+  const { data, error } = await getScanStateTable()
     .select(snapshotColumn)
     .eq('source', source)
     .eq('company', company)
@@ -363,17 +418,15 @@ export async function setPreviousSuccessfulScanIds(
 
   const snapshot = JSON.stringify([...new Set(ids)].sort());
 
-  const { error } = await getSupabase()
-    .from('scan_state')
-    .upsert(
-      {
-        source,
-        company,
-        last_successful_scan_started_at: new Date().toISOString(),
-        [snapshotColumn]: snapshot,
-      },
-      { onConflict: 'source,company', ignoreDuplicates: false }
-    );
+  const { error } = await getScanStateTable().upsert(
+    {
+      source,
+      company,
+      last_successful_scan_started_at: new Date().toISOString(),
+      [snapshotColumn]: snapshot,
+    },
+    { onConflict: 'source,company', ignoreDuplicates: false }
+  );
 
   if (error) {
     if (error.message.includes('row-level security')) {
@@ -398,7 +451,16 @@ export async function cleanupOldJobs(): Promise<number> {
 
 export async function getSubscribers(): Promise<string[]> {
   await ensureInit();
-  const { data, error } = await getSupabase().from('subscribers').select('email');
+  const subscribersTable = (getSupabase() as any).from(
+    'subscribers'
+  ) as {
+    select: (columns: string) => PromiseLike<{
+      data: SubscriberRow[] | null;
+      error: { message: string } | null;
+    }>;
+  };
+
+  const { data, error } = await subscribersTable.select('email');
   if (error) throw new Error(`getSubscribers: ${error.message}`);
   return (data ?? []).map((row: { email: string }) => row.email);
 }
