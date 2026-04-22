@@ -25,10 +25,11 @@ Your JobRadar job alert scheduler is now active and running.
 
 Here's what it's watching:
 
-  Companies:  Microsoft · Google · Amazon · Apple · Meta
+  Companies:  Anthropic · Figma · Stripe · Airbnb · Datadog
+              Instacart · Discord · Coinbase · Roblox · Dropbox
   Roles:      Software Engineer, Backend Engineer, Frontend Engineer,
               Full Stack Engineer, AI Engineer, ML Engineer
-  Location:   United States (Remote-friendly)
+  Source:     Greenhouse boards API per company tenant
   Frequency:  Every 20 minutes
 
 Whenever new jobs matching these criteria are posted, you'll get an email at this address with the titles and direct apply links — grouped by company.

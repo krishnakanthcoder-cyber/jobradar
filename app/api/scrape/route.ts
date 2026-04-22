@@ -1,79 +1,72 @@
 import { NextResponse } from 'next/server';
-import { scrapePortal } from '@/lib/scraper';
-import { PORTALS, KEYWORDS } from '@/lib/portals';
-import { getKnownIds, insertNewJobs, markExpired, markNotified, cleanupOldJobs } from '@/lib/db';
-import { notifySubscribers } from '@/lib/notifier';
-import type { ScrapedJob } from '@/lib/scraper';
+import { PORTALS } from '@/lib/portals';
+import { runScan } from '@/lib/run-scan';
+import { setScanProgress, startScanProgress } from '@/lib/scan-progress';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
-    const cleaned = await cleanupOldJobs();
-    if (cleaned > 0) console.log(`[scrape] cleanup: removed ${cleaned} old jobs`);
-
-    // Fetch known IDs once upfront
-    const knownIds = await getKnownIds();
-
-    const allNewJobs: ScrapedJob[] = [];
-    const allScrapedIds = new Set<string>();
-    const seen = new Set<string>();
-
-    for (const portal of PORTALS) {
-      for (const keyword of KEYWORDS) {
-        const url = portal.buildUrl(keyword);
-        console.log(`[scrape] fetching: ${url}`);
-        const jobs = await scrapePortal(portal.name, url, keyword, portal.selector);
-
-        // Deduplicate within this run
-        const unique = jobs.filter((j) => {
-          if (seen.has(j.id)) return false;
-          seen.add(j.id);
-          return true;
+    startScanProgress(PORTALS.length);
+    const result = await runScan({
+      logPrefix: 'scrape',
+      onPortalStart: (portal, index, total) => {
+        setScanProgress({
+          stage: 'scanning',
+          currentPortal: portal.name,
+          completedPortals: index,
+          message: `Scanning ${portal.name} (${index + 1}/${total})`,
         });
+      },
+      onPortalComplete: ({ portal, index, total, jobsPublishedToday, totalNewJobsFound }) => {
+        setScanProgress({
+          stage: 'scanning',
+          currentPortal: portal.name,
+          completedPortals: index + 1,
+          recentJobs: totalNewJobsFound,
+          message: `Finished ${portal.name} (${index + 1}/${total}) - ${jobsPublishedToday} job${jobsPublishedToday === 1 ? '' : 's'} posted today`,
+        });
+      },
+      onFinishing: ({ newJobs, expiredJobs }) => {
+        setScanProgress({
+          stage: 'finishing',
+          currentPortal: null,
+          expiredJobs,
+          recentJobs: newJobs,
+          message: 'Finalizing scan results...',
+        });
+      },
+    });
 
-        // Track all scraped IDs for expired detection later
-        for (const j of unique) allScrapedIds.add(j.id);
-
-        // Find jobs not yet in DB
-        const newJobs = unique.filter((j) => !knownIds.has(j.id));
-
-        if (newJobs.length > 0) {
-          await insertNewJobs(newJobs);
-          console.log(`[scrape] ${portal.name} "${keyword}" → inserted ${newJobs.length} new jobs`);
-          // Add to knownIds so later portals don't re-insert the same listing
-          for (const j of newJobs) knownIds.add(j.id);
-          allNewJobs.push(...newJobs);
-        }
-
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-
-    // Mark jobs that vanished from all portals as expired
-    const expiredIds = [...knownIds].filter((id) => !allScrapedIds.has(id));
-    if (expiredIds.length > 0) {
-      await markExpired(expiredIds);
-      console.log(`[scrape] marked ${expiredIds.length} jobs as expired`);
-    }
-
-    // Send one notification email for all new jobs found this run
-    if (allNewJobs.length > 0) {
-      await notifySubscribers(allNewJobs);
-      await markNotified(allNewJobs.map((j) => j.id));
-    }
-
-    console.log(`[scrape] done — ${allNewJobs.length} new, ${expiredIds.length} expired`);
+    setScanProgress({
+      running: false,
+      stage: 'completed',
+      currentPortal: null,
+      completedPortals: PORTALS.length,
+      recentJobs: result.newJobs,
+      expiredJobs: result.expired,
+      finishedAt: new Date().toISOString(),
+      message: `Scan complete. ${result.newJobs} new job${result.newJobs === 1 ? '' : 's'} found.`,
+      error: null,
+    });
 
     return NextResponse.json({
       ok: true,
-      scraped: allScrapedIds.size,
-      newJobs: allNewJobs.length,
-      expired: expiredIds.length,
+      scraped: result.scraped,
+      newJobs: result.newJobs,
+      expired: result.expired,
     });
   } catch (err) {
     console.error('[scrape] error:', err);
+    const message = String(err);
+    setScanProgress({
+      running: false,
+      stage: 'error',
+      finishedAt: new Date().toISOString(),
+      message: 'Scan failed.',
+      error: message,
+    });
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

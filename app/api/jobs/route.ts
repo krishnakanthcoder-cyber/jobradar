@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTodaysJobs, getAllActiveJobs } from '@/lib/db';
+import { getNewJobs, getTodaysJobs } from '@/lib/db';
+import { getLiveLocationsByUrl } from '@/lib/scraper';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,13 +9,28 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const company = searchParams.get('company') ?? undefined;
     const keyword = searchParams.get('keyword') ?? undefined;
-    const all = searchParams.get('all') === 'true';
+    const [todayJobs, newJobs] = await Promise.all([
+      getTodaysJobs({ company, keyword }),
+      getNewJobs({ company, keyword }),
+    ]);
 
-    const jobs = all
-      ? await getAllActiveJobs({ company, keyword })
-      : await getTodaysJobs({ company, keyword });
+    let locationsByUrl = new Map<string, string>();
+    try {
+      locationsByUrl = await getLiveLocationsByUrl(company);
+    } catch (locationErr) {
+      console.error('[api/jobs] location enrichment failed:', locationErr);
+    }
 
-    return NextResponse.json(jobs);
+    // Keep one response shape for the frontend tabs.
+    const enrichJobs = <T extends { url: string | null }>(jobs: T[]) => jobs.map((job) => ({
+      ...job,
+      location: job.url ? locationsByUrl.get(job.url) ?? null : null,
+    }));
+
+    return NextResponse.json({
+      todayJobs: enrichJobs(todayJobs),
+      newJobs: enrichJobs(newJobs),
+    });
   } catch (err) {
     console.error('[api/jobs] error:', err);
     return NextResponse.json({ error: 'Failed to load jobs' }, { status: 500 });

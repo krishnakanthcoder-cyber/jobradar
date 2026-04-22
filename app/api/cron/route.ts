@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { scrapePortal } from '@/lib/scraper';
-import { PORTALS, KEYWORDS } from '@/lib/portals';
-import { getKnownIds, insertNewJobs, markExpired, markNotified, cleanupOldJobs } from '@/lib/db';
-import { notifySubscribers } from '@/lib/notifier';
-import type { ScrapedJob } from '@/lib/scraper';
+import { runScan } from '@/lib/run-scan';
 
 export const maxDuration = 300;
 
@@ -14,57 +10,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const cleaned = await cleanupOldJobs();
-    if (cleaned > 0) console.log(`[cron] cleanup: removed ${cleaned} old jobs`);
-
-    const knownIds = await getKnownIds();
-
-    const allNewJobs: ScrapedJob[] = [];
-    const allScrapedIds = new Set<string>();
-    const seen = new Set<string>();
-
-    for (const portal of PORTALS) {
-      for (const keyword of KEYWORDS) {
-        const url = portal.buildUrl(keyword);
-        const jobs = await scrapePortal(portal.name, url, keyword, portal.selector);
-
-        const unique = jobs.filter((j) => {
-          if (seen.has(j.id)) return false;
-          seen.add(j.id);
-          return true;
-        });
-
-        for (const j of unique) allScrapedIds.add(j.id);
-
-        const newJobs = unique.filter((j) => !knownIds.has(j.id));
-
-        if (newJobs.length > 0) {
-          await insertNewJobs(newJobs);
-          console.log(`[cron] ${portal.name} "${keyword}" → inserted ${newJobs.length} new jobs`);
-          for (const j of newJobs) knownIds.add(j.id);
-          allNewJobs.push(...newJobs);
-        }
-
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-
-    const expiredIds = [...knownIds].filter((id) => !allScrapedIds.has(id));
-    if (expiredIds.length > 0) {
-      await markExpired(expiredIds);
-      console.log(`[cron] marked ${expiredIds.length} jobs as expired`);
-    }
-
-    if (allNewJobs.length > 0) {
-      await notifySubscribers(allNewJobs);
-      await markNotified(allNewJobs.map((j) => j.id));
-    }
+    const result = await runScan({ logPrefix: 'cron' });
 
     return NextResponse.json({
       ok: true,
-      scraped: allScrapedIds.size,
-      newJobs: allNewJobs.length,
-      expired: expiredIds.length,
+      scraped: result.scraped,
+      newJobs: result.newJobs,
+      expired: result.expired,
     });
   } catch (err) {
     console.error('[cron] error:', err);
