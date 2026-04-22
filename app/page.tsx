@@ -17,6 +17,7 @@ interface Job {
 interface JobsResponse {
   todayJobs: Job[];
   newJobs: Job[];
+  lastScanAt: string | null;
 }
 
 interface ScanProgress {
@@ -180,6 +181,7 @@ export default function Home() {
   const [jobSets, setJobSets] = useState<JobsResponse>({
     todayJobs: [],
     newJobs: [],
+    lastScanAt: null,
   });
   const [activeTab, setActiveTab] = useState<JobsTab>('new');
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
@@ -312,6 +314,12 @@ export default function Home() {
     hour: '2-digit',
     minute: '2-digit',
   });
+  const lastScanStr = jobSets.lastScanAt
+    ? new Date(jobSets.lastScanAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
   const hasActiveFilters =
     selectedCompanies.length > 0 ||
     selectedKeywords.length > 0 ||
@@ -1413,11 +1421,11 @@ export default function Home() {
                 </div>
 
                 <div className="stat-card">
-                  <div className="stat-label">Last checked</div>
+                  <div className="stat-label">Last scan</div>
                   <div className="stat-value" style={{ fontSize: '1.55rem', color: accent }}>
-                    {lastCheckedStr ?? '--:--'}
+                    {lastScanStr ?? '--:--'}
                   </div>
-                  <div className="stat-foot">Latest successful feed sync</div>
+                  <div className="stat-foot">Time the last scan completed</div>
                 </div>
               </div>
             </div>

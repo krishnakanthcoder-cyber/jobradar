@@ -449,6 +449,37 @@ export async function cleanupOldJobs(): Promise<number> {
   return todayRemoved + newRemoved;
 }
 
+export async function addSubscriber(email: string): Promise<void> {
+  await ensureInit();
+  const { error } = await (getSupabase() as any)
+    .from('subscribers')
+    .upsert({ email }, { onConflict: 'email', ignoreDuplicates: true });
+  if (error) throw new Error(`addSubscriber: ${error.message}`);
+}
+
+export async function removeSubscriber(email: string): Promise<void> {
+  await ensureInit();
+  const { error } = await (getSupabase() as any)
+    .from('subscribers')
+    .delete()
+    .eq('email', email);
+  if (error) throw new Error(`removeSubscriber: ${error.message}`);
+}
+
+export async function getLastScanTime(): Promise<string | null> {
+  if (!(await supportsScanStateTable())) return null;
+
+  const { data, error } = await getScanStateTable()
+    .select('last_successful_scan_started_at')
+    .eq('source', DEFAULT_SCAN_SOURCE)
+    .eq('company', DEFAULT_SCAN_COMPANY)
+    .maybeSingle();
+
+  if (error) return null;
+  return (data as { last_successful_scan_started_at?: string | null } | null)
+    ?.last_successful_scan_started_at ?? null;
+}
+
 export async function getSubscribers(): Promise<string[]> {
   await ensureInit();
   const subscribersTable = (getSupabase() as any).from(

@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -29,6 +31,7 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  padding-top: 56px;
 }
 
 * {
@@ -45,5 +48,122 @@ a {
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
+  }
+}
+
+/* Navbar */
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  width: 100%;
+  border-bottom: 1px solid rgba(24, 24, 27, 0.08);
+  background: rgba(255, 253, 249, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.navbar-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.navbar-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.navbar-logo-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #c95b26, #d97c4d);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 4px 10px rgba(201, 91, 38, 0.28);
+}
+
+.navbar-logo-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.navbar-logo-text {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #18181b;
+}
+
+.navbar-tagline {
+  font-size: 13px;
+  font-weight: 500;
+  color: #78716c;
+  padding-left: 16px;
+  border-left: 1px solid rgba(24, 24, 27, 0.12);
+}
+
+.navbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.navbar-link {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #44403c;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.navbar-link:hover {
+  background: rgba(24, 24, 27, 0.05);
+  color: #18181b;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navbar-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(24, 24, 27, 0.08);
+  background: rgba(24, 24, 27, 0.04);
+  color: #57534e;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .navbar-tagline {
+    display: none;
+  }
+
+  .navbar-badge:last-child {
+    display: none;
   }
 }
